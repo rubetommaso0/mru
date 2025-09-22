@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simulatore di Moto Uniformemente Accelerato (1D)</title>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.6.0/lib/p5.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 12px; background:#f6f8fa; color:#111; font-size:20px; }
+    .container { display: flex; gap:20px; align-items:flex-start; }
+    .panel { background: white; border-radius:10px; padding:16px; box-shadow: 0 6px 18px rgba(20,30,40,0.06); font-size:20px; }
+    #sketch-holder { width:650px; height:350px; }
+    canvas.chart { background: white; border-radius:8px; margin-top:16px; width:480px !important; height:300px !important; }
+    .controls { margin-top:14px; display:flex; flex-wrap:wrap; gap:12px; font-size:20px; }
+    .sliders-extra { margin-top:18px; display:flex; flex-wrap:wrap; gap:16px; font-size:20px; }
+    label { font-size:20px; margin-right:6px; }
+    input, button { font-size:20px; }
+    input[type="number"] { width:100px; }
+    input[type="range"] { width:120px; }
+    button { padding:8px 14px; border:none; border-radius:6px; cursor:pointer; }
+    .btn-primary { background:#0366d6; color:white; }
+    .btn-secondary { background:#6c757d; color:white; }
+  </style>
+</head>
+<body>
+  <h2 style="font-size:26px;">Simulatore di moto uniformemente accelerato — 1D</h2>
+  <div class="container">
+    <div class="panel">
+      <div id="sketch-holder"></div>
+      <div class="controls">
+        <label>s₀ <input id="s0" type="number" value="0"></label>
+        <label>v₀ <input id="v0" type="number" value="50"></label>
+        <label>a <input id="a" type="number" value="-9.81"></label>
+        <label>scala spazio <input id="scaleSlider" type="range" min="100" max="500" step="50" value="200"></label>
+        <button id="playPause" class="btn-primary">Avvia</button>
+        <button id="reset" class="btn-secondary">Reset</button>
+      </div>
+      <div class="sliders-extra">
+        <label>scala tempo <input id="timeSlider" type="range" min="5" max="60" step="5" value="20"></label>
+        <label>scala velocità <input id="velSlider" type="range" min="50" max="300" step="10" value="100"></label>
+        <label>scala distanza <input id="distSlider" type="range" min="100" max="1000" step="50" value="250"></label>
+      </div>
+      <div style="margin-top:10px;">
+        t = <span id="tVal">0.00</span> s | s = <span id="sVal">0.00</span> m | v = <span id="vVal">0.00</span> m/s
+      </div>
+    </div>
+    <div class="panel">
+      <canvas id="vtChart" class="chart"></canvas>
+      <canvas id="stChart" class="chart"></canvas>
+    </div>
+  </div>
+
+<script>
+let state = {
+  s0: 0,
+  v0: 50,
+  a: -9.81,
+  t: 0,
+  playing: false,
+  scale: 200,
+  tMax: 20,
+  vMax: 100,
+  sMax: 250
+};
+
+function computeS(t){ return state.s0 + state.v0*t + 0.5*state.a*t*t; }
+function computeV(t){ return state.v0 + state.a*t; }
+
+function drawArrow(p, x1, y1, x2, y2, color, label){
+  p.stroke(color);
+  p.fill(color);
+  p.strokeWeight(3);
+  p.line(x1, y1, x2, y2);
+  let angle = Math.atan2(y2-y1, x2-x1);
+  let arrowSize = 12;
+  p.push();
+  p.translate(x2, y2);
+  p.rotate(angle);
+  p.triangle(0, 0, -arrowSize, arrowSize/2, -arrowSize, -arrowSize/2);
+  p.pop();
+  if(label){
+    p.noStroke();
+    p.textAlign(p.LEFT, p.BOTTOM);
+    p.textSize(18);
+    p.fill(color);
+    p.text(label, x2+8, y2-8);
+  }
+}
+
+let sketch = (p)=>{
+  p.setup = ()=>{
+    const holder = document.getElementById("sketch-holder");
+    let cnv = p.createCanvas(holder.clientWidth, holder.clientHeight);
+    cnv.parent("sketch-holder");
+    p.textSize(18);
+  };
+  p.windowResized = ()=>{
+    const holder = document.getElementById("sketch-holder");
+    p.resizeCanvas(holder.clientWidth, holder.clientHeight);
+  };
+  p.draw = ()=>{
+    p.background(245);
+    if(state.playing){ state.t += p.deltaTime/1000; }
+
+    let s = computeS(state.t);
+    let v = computeV(state.t);
+
+    p.stroke(0);
+    p.line(20, p.height/2, p.width-20, p.height/2);
+    p.line(60, 20, 60, p.height-20);
+
+    p.textAlign(p.CENTER, p.TOP);
+    p.fill(0);
+    for(let ref=-state.scale; ref<=state.scale; ref+=50){
+      let x = p.map(ref, -state.scale, state.scale, 20, p.width-20);
+      p.stroke(180); p.line(x, p.height/2-6, x, p.height/2+6);
+      p.noStroke(); p.text(ref, x, p.height/2+12);
+    }
+
+    let x = p.map(s, -state.scale, state.scale, 20, p.width-20);
+    p.fill(0,200,0); p.circle(x, p.height/2, 28);
+
+    p.stroke(0,120,220); p.strokeWeight(2);
+    p.line(60, p.height/2, x, p.height/2);
+
+    drawArrow(p, x, p.height/2-50, x+v*2, p.height/2-50, p.color(220,40,40), "velocità");
+
+    document.getElementById("tVal").textContent = state.t.toFixed(2);
+    document.getElementById("sVal").textContent = s.toFixed(2);
+    document.getElementById("vVal").textContent = v.toFixed(2);
+
+    pushChartData(state.t, s, v);
+  };
+};
+new p5(sketch);
+
+const fontOpts = { size: 18, family: 'Arial', weight: 'bold' };
+
+const vtChart = new Chart(document.getElementById("vtChart"), {
+  type:"line",
+  data:{ datasets:[{ label:"velocità v(t)", data:[], parsing:{xAxisKey:"x",yAxisKey:"y"}, pointRadius:0, borderColor:"red" }]},
+  options:{ animation:false, maintainAspectRatio:false, scales:{x:{type:"linear", min:0, max:state.tMax, title:{display:true,text:"t (s)", font:fontOpts}, ticks:{font:fontOpts}}, y:{min:-state.vMax, max:state.vMax, title:{display:true,text:"v (m/s)", font:fontOpts}, ticks:{font:fontOpts}}}, plugins:{legend:{labels:{font:fontOpts}}} }
+});
+const stChart = new Chart(document.getElementById("stChart"), {
+  type:"line",
+  data:{ datasets:[{ label:"spostamento s(t)", data:[], parsing:{xAxisKey:"x",yAxisKey:"y"}, pointRadius:0, borderColor:"blue" }]},
+  options:{ animation:false, maintainAspectRatio:false, scales:{x:{type:"linear", min:0, max:state.tMax, title:{display:true,text:"t (s)", font:fontOpts}, ticks:{font:fontOpts}}, y:{min:-state.sMax, max:state.sMax, title:{display:true,text:"s (m)", font:fontOpts}, ticks:{font:fontOpts}}}, plugins:{legend:{labels:{font:fontOpts}}} }
+});
+
+function pushChartData(t,s,v){
+  if(t<=state.tMax){
+    vtChart.data.datasets[0].data.push({x:t,y:v});
+    stChart.data.datasets[0].data.push({x:t,y:s});
+    vtChart.update("none");
+    stChart.update("none");
+  }
+}
+
+const s0Field=document.getElementById("s0");
+const v0Field=document.getElementById("v0");
+const aField=document.getElementById("a");
+const scaleSlider=document.getElementById("scaleSlider");
+const timeSlider=document.getElementById("timeSlider");
+const velSlider=document.getElementById("velSlider");
+const distSlider=document.getElementById("distSlider");
+
+s0Field.addEventListener("change",()=>{ state.s0=parseFloat(s0Field.value); resetSim(); });
+v0Field.addEventListener("change",()=>{ state.v0=parseFloat(v0Field.value); resetSim(); });
+aField.addEventListener("change",()=>{ state.a=parseFloat(aField.value); resetSim(); });
+scaleSlider.addEventListener("input",()=>{ state.scale=parseFloat(scaleSlider.value); });
+timeSlider.addEventListener("input",()=>{ state.tMax=parseFloat(timeSlider.value); updateChartScales(); resetSim(); });
+velSlider.addEventListener("input",()=>{ state.vMax=parseFloat(velSlider.value); updateChartScales(); resetSim(); });
+distSlider.addEventListener("input",()=>{ state.sMax=parseFloat(distSlider.value); updateChartScales(); resetSim(); });
+
+document.getElementById("playPause").addEventListener("click",()=>{
+  state.playing=!state.playing;
+  document.getElementById("playPause").textContent= state.playing?"Pausa":"Avvia";
+});
+document.getElementById("reset").addEventListener("click",resetSim);
+
+function resetSim(){
+  state.t=0; state.playing=false;
+  document.getElementById("playPause").textContent="Avvia";
+  vtChart.data.datasets[0].data=[]; stChart.data.datasets[0].data=[];
+  vtChart.update(); stChart.update();
+}
+
+function updateChartScales(){
+  vtChart.options.scales.x.max = state.tMax;
+  stChart.options.scales.x.max = state.tMax;
+  vtChart.options.scales.y.min = -state.vMax;
+  vtChart.options.scales.y.max = state.vMax;
+  stChart.options.scales.y.min = -state.sMax;
+  stChart.options.scales.y.max = state.sMax;
+  vtChart.update();
+  stChart.update();
+}
+</script>
+</body>
+</html>
