@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Moto Circolare — spessore vettori per magnitudo</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 18px;
+  }
+  .simulation-container { display:flex; gap:20px; align-items:flex-start; }
+  canvas.main { border:1px solid #333; background:#f0f0f0; }
+  .mini-charts { display:flex; flex-direction:column; gap:18px; }
+  canvas.mini { border:1px solid #333; background:#f9f9f9; }
+  .controls { margin:14px 0; }
+  .controls label { margin-right:10px; }
+  h2 { margin-top:18px; }
+  button { margin-left:8px; padding:6px 10px; }
+</style>
+</head>
+<body>
+
+<h1>Moto Circolare — spessore vettori proporzionale alla magnitudo</h1>
+
+<div class="controls">
+  <label>Raggio (cm): <input id="radius" type="number" value="10" min="1" max="30"></label>
+  <label>Velocità angolare (rad/s): <input id="omega" type="number" value="1" step="0.1"></label>
+  <button id="resetBtn">Reset</button>
+  <button id="pauseBtn">Pausa</button>
+</div>
+
+<div class="simulation-container">
+  <canvas id="canvasMain" class="main"></canvas>
+
+  <div class="mini-charts">
+    <canvas id="sVector" class="mini"></canvas>
+    <canvas id="vVector" class="mini"></canvas>
+    <canvas id="aVector" class="mini"></canvas>
+  </div>
+</div>
+
+<h2>Spostamento (cm)</h2>
+<canvas id="dispChart" width="800" height="200"></canvas>
+<h2>Velocità (cm/s)</h2>
+<canvas id="velChart" width="800" height="200"></canvas>
+<h2>Accelerazione (cm/s²)</h2>
+<canvas id="accChart" width="800" height="200"></canvas>
+
+<script>
+/* ---------- DPI-aware canvas helper ---------- */
+function setupCanvasLogical(canvas, logicalWidth, logicalHeight){
+  const ratio = window.devicePixelRatio || 1;
+  canvas.style.width = logicalWidth + 'px';
+  canvas.style.height = logicalHeight + 'px';
+  canvas.width = Math.round(logicalWidth * ratio);
+  canvas.height = Math.round(logicalHeight * ratio);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return { ctx, w: logicalWidth, h: logicalHeight, ratio };
+}
+
+/* ---------- Setup ---------- */
+const mainCanvas = document.getElementById('canvasMain');
+const main = setupCanvasLogical(mainCanvas, 500, 500);
+const ctx = main.ctx;
+
+const MINI_SIZE = 200;
+const sCanvas = document.getElementById('sVector');
+const vCanvas = document.getElementById('vVector');
+const aCanvas = document.getElementById('aVector');
+const s = setupCanvasLogical(sCanvas, MINI_SIZE, MINI_SIZE);
+const v = setupCanvasLogical(vCanvas, MINI_SIZE, MINI_SIZE);
+const a = setupCanvasLogical(aCanvas, MINI_SIZE, MINI_SIZE);
+
+/* Chart.js contexts */
+const dispCtx = document.getElementById('dispChart').getContext('2d');
+const velCtx  = document.getElementById('velChart').getContext('2d');
+const accCtx  = document.getElementById('accChart').getContext('2d');
+
+/* Physical / visual params */
+const scale = 20;                // 1 cm = 20 px (logici)
+let radius_cm = parseFloat(document.getElementById('radius').value);
+let radius = radius_cm * scale;
+let omega = parseFloat(document.getElementById('omega').value);
+
+let t = 0;
+const dt = 0.02;
+const totalTime = 15;
+
+/* labels fissi */
+const labels = Array.from({length: Math.round(totalTime/dt)+1}, (_, i) => (i*dt).toFixed(2));
+
+/* ---------- Chart.js: grafici principali ---------- */
+function createChart(ctx, labelY, colorX, colorY) {
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: 'X', data: Array(labels.length).fill(null), borderColor: colorX, fill: false, tension:0 },
+        { label: 'Y', data: Array(labels.length).fill(null), borderColor: colorY, fill: false, tension:0 }
+      ]
+    },
+    options: {
+      responsive: true,
+      animation: false,
+      scales: {
+        x: { type: 'linear', min: 0, max: totalTime, title: { display: true, text: 'Tempo (s)' } },
+        y: { title: { display: true, text: labelY } }
+      },
+      plugins: { legend: { position: 'top' } }
+    }
+  });
+}
+
+const dispChart = createChart(dispCtx, 'cm', 'blue', 'darkblue');
+const velChart  = createChart(velCtx, 'cm/s', 'green', 'darkgreen');
+const accChart  = createChart(accCtx, 'cm/s²', 'orange', 'darkorange');
+
+/* ---------- Drawing main canvas ---------- */
+const centerX = main.w / 2;
+const centerY = main.h / 2;
+
+function drawAxesMain(){
+  const ctx = main.ctx;
+  ctx.save();
+  ctx.clearRect(0,0,main.w,main.h);
+
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, centerY); ctx.lineTo(main.w, centerY);
+  ctx.moveTo(centerX, 0); ctx.lineTo(centerX, main.h);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#ccc';
+  ctx.lineWidth = 1;
+  const ticks = 15;
+  for(let i=-ticks;i<=ticks;i++){
+    const gx = centerX + i*scale;
+    const gy = centerY - i*scale;
+    ctx.beginPath(); ctx.moveTo(gx, centerY-6); ctx.lineTo(gx, centerY+6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(centerX-6, gy); ctx.lineTo(centerX+6, gy); ctx.stroke();
+  }
+
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(centerX, centerY, 4, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawCircleMain(){
+  const ctx = main.ctx;
+  ctx.save();
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(centerX, centerY, radius, 0, Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+
+function drawParticleMain(x,y){
+  const ctx = main.ctx;
+  ctx.save();
+  ctx.fillStyle = 'red';
+  ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+/* drawVectorMain now accepts a thickness parameter:
+   If thickness omitted, default 3
+*/
+function drawVectorMain(x0,y0,x1,y1,color,label, thickness=3){
+  const ctx = main.ctx;
+  ctx.save();
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = thickness;
+  ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+
+  // freccia (scaled with thickness)
+  const head = Math.max(8, Math.min(20, thickness*3));
+  const dx = x1-x0, dy = y1-y0;
+  const ang = Math.atan2(dy,dx);
+  ctx.beginPath();
+  ctx.moveTo(x1,y1);
+  ctx.lineTo(x1-head*Math.cos(ang-Math.PI/6), y1-head*Math.sin(ang-Math.PI/6));
+  ctx.lineTo(x1-head*Math.cos(ang+Math.PI/6), y1-head*Math.sin(ang+Math.PI/6));
+  ctx.closePath(); ctx.fill();
+
+  if(label){
+    ctx.font = '14px Arial'; ctx.fillText(label, x1+6, y1+6);
+  }
+  ctx.restore();
+}
+
+/* ---------- Mini-canvas helpers (no libs) ---------- */
+function drawAxesMini(ctxObj){
+  const ctx = ctxObj.ctx;
+  const w = ctxObj.w, h = ctxObj.h;
+  ctx.save();
+  ctx.clearRect(0,0,w,h);
+  const ox = w/2, oy = h/2;
+
+  ctx.strokeStyle = '#555'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(w, oy);
+  ctx.moveTo(ox, 0); ctx.lineTo(ox, h); ctx.stroke();
+
+  ctx.strokeStyle = '#ddd'; ctx.lineWidth = 1;
+  const len = Math.min(w,h);
+  for(let i=-4;i<=4;i++){
+    const x = ox + i*(len/8);
+    ctx.beginPath(); ctx.moveTo(x, oy-4); ctx.lineTo(x, oy+4); ctx.stroke();
+    const y = oy + i*(len/8);
+    ctx.beginPath(); ctx.moveTo(ox-4, y); ctx.lineTo(ox+4, y); ctx.stroke();
+  }
+
+  ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(ox,oy,3,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+/* Draw vector in mini canvas. Use same Y-sign convention as main (y increases downward) */
+function drawVectorMini(ctxObj, vector, color){
+  const ctx = ctxObj.ctx;
+  const w = ctxObj.w, h = ctxObj.h;
+  drawAxesMini(ctxObj);
+  const ox = w/2, oy = h/2;
+  const len = Math.min(w,h)/2 * 0.78;
+  const endX = ox + vector.x * len;
+  const endY = oy + vector.y * len; // same sign as main
+  ctx.save();
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(ox,oy); ctx.lineTo(endX,endY); ctx.stroke();
+  ctx.beginPath(); ctx.arc(endX,endY,5,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+/* ---------- Animation loop with pause control ---------- */
+let rafId = null;
+let isRunning = true; // inizialmente in esecuzione
+
+function startLoop(){
+  if(!rafId){
+    rafId = requestAnimationFrame(loop);
+    isRunning = true;
+    pauseBtn.textContent = 'Pausa';
+  }
+}
+
+function stopLoop(){
+  if(rafId){
+    cancelAnimationFrame(rafId);
+    rafId = null;
+    isRunning = false;
+    pauseBtn.textContent = 'Riprendi';
+  }
+}
+
+function loop(){
+  // Disegno frame
+  drawAxesMain();
+  drawCircleMain();
+
+  const angle = omega * t;
+  // posizione (main uses y downward => visual rotation clockwise as angle increases)
+  const px = centerX + radius * Math.cos(angle);
+  const py = centerY + radius * Math.sin(angle);
+  drawParticleMain(px, py);
+
+  // unit vectors (same sign convention as main canvas)
+  const s_unit = { x: Math.cos(angle),      y: Math.sin(angle) };
+  const v_unit = { x: -Math.sin(angle),     y:  Math.cos(angle) };
+  const a_unit = { x: -Math.cos(angle),     y: -Math.sin(angle) };
+
+  // magnitudo fisiche
+  const v_mag = radius_cm * omega;           // cm/s
+  const a_mag = radius_cm * omega * omega;   // cm/s^2
+
+  // draw displacement vector with real length (radius)
+  drawVectorMain(centerX, centerY, centerX + s_unit.x*radius, centerY + s_unit.y*radius, 'blue', 'r', 3);
+
+  // VISUAL: velocity and acceleration vectors have FIXED visual length,
+  //       but lineWidth (spessore) reflects magnitude.
+  const fixedLen = Math.min(90, main.w * 0.16); // lunghezza visiva fissa per v/a
+  // map magnitudes to thickness (tunable)
+  function mapThickness(value, scaleFactor, minT=1.5, maxT=18){
+    const t = minT + scaleFactor * value;
+    return Math.max(minT, Math.min(maxT, t));
+  }
+  const vThickness = mapThickness(Math.abs(v_mag), 0.22, 1.5, 18); // empirico
+  const aThickness = mapThickness(Math.abs(a_mag), 0.02, 1.5, 22);   // empirico
+
+  // draw velocity: fixed length oriented along v_unit, thickness ~ v_mag
+  const vx_end_x = px + v_unit.x * fixedLen;
+  const vx_end_y = py + v_unit.y * fixedLen;
+  drawVectorMain(px, py, vx_end_x, vx_end_y, 'green', 'v', vThickness);
+
+  // draw acceleration: fixed length oriented along a_unit, thickness ~ a_mag
+  const ax_end_x = px + a_unit.x * fixedLen;
+  const ax_end_y = py + a_unit.y * fixedLen;
+  drawVectorMain(px, py, ax_end_x, ax_end_y, 'orange', 'a', aThickness);
+
+  // aggiorna chart principali se entro totalTime
+  if(t <= totalTime){
+    const idx = Math.round(t / dt);
+    dispChart.data.datasets[0].data[idx] = (px - centerX) / scale;
+    dispChart.data.datasets[1].data[idx] = (py - centerY) / scale;
+    velChart.data.datasets[0].data[idx] = v_unit.x * v_mag; // vx in cm/s
+    velChart.data.datasets[1].data[idx] = v_unit.y * v_mag; // vy
+    accChart.data.datasets[0].data[idx] = a_unit.x * a_mag; // ax in cm/s^2
+    accChart.data.datasets[1].data[idx] = a_unit.y * a_mag; // ay
+    dispChart.update('none'); velChart.update('none'); accChart.update('none');
+  }
+
+  // aggiorna mini-canvas (unit vectors in same coordinate sense)
+  drawVectorMini(s, s_unit, 'blue');
+  drawVectorMini(v, v_unit, 'green');
+  drawVectorMini(a, a_unit, 'orange');
+
+  t += dt;
+  rafId = requestAnimationFrame(loop);
+}
+
+/* ---------- Event handlers ---------- */
+const radiusInput = document.getElementById('radius');
+const omegaInput = document.getElementById('omega');
+const resetBtn = document.getElementById('resetBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+
+radiusInput.addEventListener('input', (e)=>{
+  radius_cm = parseFloat(e.target.value) || 1;
+  radius = radius_cm * scale;
+  // disegna un frame per vedere effetto immediato se fermo
+  if(!isRunning){ drawAxesMain(); drawCircleMain(); }
+});
+omegaInput.addEventListener('input', (e)=>{
+  omega = parseFloat(e.target.value) || 0;
+});
+
+resetBtn.addEventListener('click', ()=>{
+  t = 0;
+  [dispChart, velChart, accChart].forEach(chart=>{
+    chart.data.datasets.forEach(ds=> ds.data = Array(labels.length).fill(null));
+    chart.update();
+  });
+  if(!isRunning){
+    drawAxesMain();
+    drawCircleMain();
+    const angle = omega * t;
+    drawVectorMini(s, {x:Math.cos(angle), y:Math.sin(angle)}, 'blue');
+    drawVectorMini(v, {x:-Math.sin(angle), y:Math.cos(angle)}, 'green');
+    drawVectorMini(a, {x:-Math.cos(angle), y:-Math.sin(angle)}, 'orange');
+  }
+});
+
+pauseBtn.addEventListener('click', ()=>{
+  if(isRunning) stopLoop();
+  else startLoop();
+});
+
+/* ---------- Init: disegna assi iniziali e avvia loop ---------- */
+drawAxesMain();
+drawAxesMini(s);
+drawAxesMini(v);
+drawAxesMini(a);
+
+startLoop(); // avvia animazione
+
+</script>
+</body>
+</html>
